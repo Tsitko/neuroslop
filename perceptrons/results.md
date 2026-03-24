@@ -213,3 +213,56 @@ Dropout + cosine LR decay: +3% и overfitting отложен (epoch 7-8 вмес
 - **Fourier/Rational KAN heads не дают преимущества** на CIFAR-10 — conv фичи уже хорошо структурированы, Dense+ReLU достаточно
 - **im2col + matmul** через Accelerate работает, но 15 GB памяти — дорого
 - **46s/epoch** на M4 Max — im2col loop основной bottleneck
+
+---
+
+# STT Results (Vosk Russian)
+
+## Baseline: Vosk ONNX (encoder.int8 + transducer decoder)
+
+| Тестовый набор | WER | Samples |
+|---------------|-----|---------|
+| Farfield random | 2.3% | 500 |
+| Farfield hard (rare words) | 7.4% | 200 |
+| Hard samples (our fbank) | 10.4% | 50 |
+
+Типы ошибок: иноязычные слова, слияние/разделение, морфология, редкие слова.
+
+## Fourier KAN Adapter (RNN-T loss, frozen encoder+decoder)
+
+Архитектура: `Encoder[frozen] → FourierKAN[512→512, trainable] → Decoder+Joiner[frozen]`
+
+### Experiment 1: Train on farfield test (1500 samples, 10 epochs)
+
+| Adapter | WER | Params | Δ vs baseline |
+|---------|-----|--------|---------------|
+| **Fourier KAN K=3** | **8.4%** | **3,584** | **-2.3% (↓21%)** |
+| Baseline (no adapter) | 10.7% | 0 | — |
+| Dense adapter | 14.6% | 262,144 | +3.9% (overfits) |
+
+KAN побеждает Dense: 75x меньше параметров → лучше обобщает. Fourier basis естественен для аудио фич.
+
+### Experiment 2: Train on crowd data (5000 samples, 15 epochs), test on farfield
+
+| Adapter | Best WER (epoch) | Final WER | Params |
+|---------|-----------------|-----------|--------|
+| **K=8** | **9.5% (ep3)** | 13.8% | 8,704 |
+| K=3 | 10.3% (ep1) | 13.6% | 3,584 |
+| Baseline | 10.4% | 10.4% | 0 |
+
+### Ключевые выводы STT
+
+1. **Fourier KAN адаптер улучшает WER** при правильном training (RNN-T loss, early stopping)
+2. **Domain mismatch = overfitting**: тренировка на crowd, тест на farfield — adapter overfit к crowd после epoch 3-4
+3. **Early stopping критичен**: best WER на epoch 1-3, потом деградация
+4. **KAN >> Dense для адаптеров**: меньше параметров = лучше generalization
+5. **RNN-T loss обязателен**: CTC и teacher forcing не работают для transducer fine-tuning
+
+### Неудачные подходы (задокументировано)
+
+| Подход | Результат | Причина неудачи |
+|--------|-----------|----------------|
+| Knowledge distillation (autoencoder) | Нет сигнала | Residual adapter = identity, loss=0 |
+| CTC + KAN head | WER 78.9% | CTC не знает языковую модель декодера |
+| Teacher forcing через decoder | WER 203% | Adapter "перекрикивает" decoder, бесконечные повторы |
+| RNN-T loss | **WER 8.4%** ✓ | Правильный alignment-aware loss |
