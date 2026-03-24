@@ -1,0 +1,16 @@
+.build/
+.swiftpm/
+*.DS_Store
+
+# Data files (downloaded at runtime)
+Data/
+Reference/trace/
+
+# STT data and models (large binary files)
+stt/train/
+stt/test/
+stt/vosk-model-small-ru-0.22/
+stt/vosk-onnx/
+stt/features/*.pt
+stt/features/*.npz
+stt/features/full_training.log
